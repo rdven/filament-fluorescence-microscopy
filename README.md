@@ -9,3 +9,7 @@ This can be formulated as an inverse problem, as follows:
 
 Cosinder the following cell image
 ![Microtubules in Fibroblast](./example_img/example.png)
+
+We now want to extract all the microtubules we can detect, (displayed in red) and also get local curvature estimates es seen in the rightmost image:
+
+![Demo](./example_img/processed.png)
