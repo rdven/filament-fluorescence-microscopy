@@ -1,22 +1,19 @@
+import pickle
+from collections import deque
+
 import numpy as np
 
 import tensorflow as tf
-import matplotlib.pyplot as plt
-
 from tensorflow.keras import layers, losses
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 
 from PIL import Image
-
-from fmGenerator import FMGenerator
-
 import skimage.morphology, skimage.filters
 from scipy.ndimage import convolve1d,label, gaussian_filter
-
-import pickle
 from scipy.optimize import minimize
-from collections import deque
+from scipy.interpolate import RegularGridInterpolator
+
 
 """
 This class generates filaments and realisitcally mimics the imaging process of a flourescence microscope
@@ -429,6 +426,80 @@ class Curve:
         
     def average(self,H):
         return np.average(H[self.x,self.y])
+    
+    def refine(self, Img):
+        sigma = 1.2
+        x0 = self.x
+        y0 = self.y
+        offset = 5
+        frame = [np.min(x0)-offset,np.max(x0)+offset,np.min(y0)-offset,np.max(y0)+offset]
+        V = gaussian_filter(Img[frame[0]:frame[1],frame[2]:frame[3]],sigma=1.2)
+        V /= np.max(V)
+        xF = x0-frame[0]
+        yF = y0-frame[2]
+        xStart = xF[0]
+        xEnd = xF[-1]
+        yStart = yF[0]
+        yEnd = yF[-1]
+        # build V interpolation
+        Xg = np.array(range(0,frame[1]-frame[0]))
+        Yg = np.array(range(0,frame[3]-frame[2]))
+        field = RegularGridInterpolator((Xg,Yg),V,'cubic',False,0.0)
+
+
+        def naive_interpolation(steps):
+            du = 1.0/(steps+1)
+            u = np.linspace(du,1.0-du,num=steps)
+            # transform to length
+            dL = np.sqrt((xF[1:]-xF[:-1])**2 + (yF[1:]-yF[:-1])**2)
+            L = np.sum(dL)
+            l = L*u
+            iL = np.cumsum(dL)
+            niX = np.zeros((steps))
+            niY = np.zeros((steps))
+            seg = 1
+            for i in range(steps):
+                while iL[seg-1] <= l[i]:
+                    seg += 1
+                # interpolate
+                alpha = (iL[seg-1]-l[i])/dL[seg-1]
+                niX[i] = alpha*xF[seg-1]+(1.0-alpha)*xF[seg]
+                niY[i] = alpha*yF[seg-1]+(1.0-alpha)*yF[seg]
+            return niX,niY,du*L
+
+        # start with a naive coordinate interpolation
+        factor = 5
+        interX,interY,dL = naive_interpolation(factor*(self.N-1))
+        n = len(interX)
+
+        def energy(P):
+            k = 10.0
+            dl = P[0]
+            X = P[1:n+1]
+            Y = P[n+1:]
+            # calculate streching energy
+            E = np.sum( (np.sqrt((X[1:]-X[:-1])**2 + (Y[1:]-Y[:-1])**2) - dl)**2)
+            # add endpoints
+            E += (np.sqrt((X[0]-xStart)**2+(Y[0]-yStart)**2) - dl)**2 + (np.sqrt((X[-1]-xEnd)**2+(Y[-1]-yEnd)**2) - dl)**2
+            # constant
+            E *= k
+            # field contribution
+            ep = np.array([X,Y])
+            E -= np.sum(field(ep.T))
+            E += dl**2
+            return E
+        
+        res = minimize(energy,np.concatenate([[0.5*dL],interX,interY]),method="Nelder-Mead")
+        refX = np.zeros((n+2))
+        refY = np.zeros((n+2))
+        refX[0] = xStart
+        refX[-1] = xEnd
+        refY[0] = yStart
+        refY[-1] = yEnd
+        refX[1:-1] = res.x[1:n+1]
+        refY[1:-1] = res.x[n+1:]
+
+        return refX,refY
 
 class Filament:
 
