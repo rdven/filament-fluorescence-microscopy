@@ -422,13 +422,13 @@ class Curve:
                 self.vy = np.gradient(y)
             self.v = np.sqrt(self.vx**2+self.vy**2)
             self.length = np.sum(self.v)
-        # TODO: curve image fit refinement
         
     def average(self,H):
         return np.average(H[self.x,self.y])
     
+
     def refine(self, Img):
-        sigma = 1.2
+        sigma = 5.0
         x0 = self.x
         y0 = self.y
         offset = 5
@@ -472,6 +472,14 @@ class Curve:
         interX,interY,dL = naive_interpolation(factor*(self.N-1))
         n = len(interX)
 
+        k = 1.5
+        dx = 1e-3
+        Cbuf = np.zeros((n,2))
+        delx = np.zeros((n,2))
+        delx[:,0] = dx
+        dely = np.zeros((n,2))
+        dely[:,1] = dx
+
         def energy(P):
             k = 10.0
             dl = P[0]
@@ -486,19 +494,67 @@ class Curve:
             # field contribution
             ep = np.array([X,Y])
             E -= np.sum(field(ep.T))
-            E += dl**2
+            E += 2.0*(dl-dL)**2
             return E
         
-        res = minimize(energy,np.concatenate([[0.5*dL],interX,interY]),method="Nelder-Mead")
+        def energy_2(P):
+            X = P[:n]
+            Y = P[n:]
+            # calculate streching energy
+            E = np.sum((X[1:]-X[:-1])**2 + (Y[1:]-Y[:-1])**2)
+            # add endpoints
+            E += ((X[0]-xStart)**2+(Y[0]-yStart)**2) + ((X[-1]-xEnd)**2+(Y[-1]-yEnd)**2)
+            # constant
+            E *= k
+            # field contribution
+            ep = np.array([X,Y])
+            E -= np.sum(field(ep.T))
+            return E
+        
+        def energy_2_jac(P):
+            X = P[:n]
+            Y = P[n:]
+            dX = X[1:]-X[:-1]
+            dY = Y[1:]-Y[:-1]
+            G = np.zeros(2*n)
+            G[0:n-1] += dX
+            G[1:n] -= dX
+            G[n:-1] += dY
+            G[n+1:] -= dY
+            # end points
+            G[0] -= X[0]-xStart
+            G[n-1] += xEnd-X[n-1]
+            G[n] -= Y[0]-yStart
+            G[-1] += yEnd-Y[n-1]
+            G *= 2*k
+            # field parameters ..
+            Cbuf[:,0] = X
+            Cbuf[:,1] = Y
+            Fb = field(Cbuf)
+            Fx = field(Cbuf+delx)
+            Fy = field(Cbuf+dely)
+            G[:n] += -(Fx-Fb)/dx
+            G[n:] += -(Fy-Fb)/dx
+            return -G
+
+        
+        res = minimize(energy_2,np.concatenate([interX,interY]),method="CG", jac=energy_2_jac)
         refX = np.zeros((n+2))
         refY = np.zeros((n+2))
         refX[0] = xStart
         refX[-1] = xEnd
         refY[0] = yStart
         refY[-1] = yEnd
-        refX[1:-1] = res.x[1:n+1]
-        refY[1:-1] = res.x[n+1:]
-
+        refX[1:-1] = res.x[:n]
+        refY[1:-1] = res.x[n:]
+        refX += frame[0]
+        refY += frame[2]
+        self.xold = self.x
+        self.yold = self.y
+        self.nold = self.N
+        self.x = refX
+        self.y = refY
+        self.N = n+2
         return refX,refY
 
 class Filament:
@@ -598,7 +654,7 @@ class CNNFilamentator:
 # can be saved and reloded to hard drive to prevent rerunning calculations
 # stores all relevant informations about a sample cell
 class Cell:
-    def __init__(self,MT,metadata,cnn_model=None):
+    def __init__(self,MT,metadata,cnn_model=None, verbose=False):
         '''
             MT: Microtuble channel
            # IF: IF channel # currently out
@@ -606,13 +662,28 @@ class Cell:
             metadata: dictionary containing at least items: 'date','pattern','type','resolution','c3'
             cnn_proc: The FilamentReconstructor model for filament extraction, or a path to load it, or None: use default
         '''
+        if verbose:
+            print(f"[INFO] on cell {metadata}: applying CNN.")
         cnnFil = CNNFilamentator(cnn_model)
         self.metadata = metadata
         self.MT = MT-np.min(MT) # just add the MT channel
         # extract and process filaments
+        if verbose:
+            print(f"[INFO] on cell {metadata}: segmenting CNN output.")
         self.skelett,self.labeled,self.filament = cnnFil.extract_filaments(MT)
         # do the curvature analysis use 16 px**2 as scale
-        self.filament.cp_analysis(81)
+        if verbose:
+            print(f"[INFO] on cell {metadata}: refining filaments.")
+        rfc = 0
+        for cv in self.filament.curves:
+            rfc += 1
+            if cv.N >= 5:
+                cv.refine(MT)
+            if rfc % 100 == 0:
+                print(rfc)
+        if verbose:
+            print(f"[INFO] on cell {metadata}: calculating refined curvature/orientation.")
+        self.filament.cp_analysis(25)
         return
 
     def save(self,path):
