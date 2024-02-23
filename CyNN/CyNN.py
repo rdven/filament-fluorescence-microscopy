@@ -132,7 +132,6 @@ class FilamentReconstructor(Model):
     
     # static method generates N images and filament configurations according to the imaging model specified in the FMGenerator params
     def gen_training_data(N,resolution,image_model_params=None):
-
         # image_model_params should be a dictionary containing the necessary parameters for the FMGenerator construction
         params = {'n': 15, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
         if isinstance(image_model_params,dict):
@@ -427,14 +426,12 @@ class Curve:
         return np.average(H[self.x,self.y])
     
 
-    def refine(self, Img):
-        sigma = 5.0
+    def refine(self, Img, sigma = 1.2, k=1.5, factor = 5,maxit=5):
+        #sigma = 5.0
         x0 = self.x
         y0 = self.y
         offset = 5
         frame = [np.min(x0)-offset,np.max(x0)+offset,np.min(y0)-offset,np.max(y0)+offset]
-        V = gaussian_filter(Img[frame[0]:frame[1],frame[2]:frame[3]],sigma=1.2)
-        V /= np.max(V)
         xF = x0-frame[0]
         yF = y0-frame[2]
         xStart = xF[0]
@@ -442,6 +439,8 @@ class Curve:
         yStart = yF[0]
         yEnd = yF[-1]
         # build V interpolation
+        V = gaussian_filter(Img[frame[0]:frame[1],frame[2]:frame[3]],sigma=sigma)
+        V /= np.mean(V[xF,yF])
         Xg = np.array(range(0,frame[1]-frame[0]))
         Yg = np.array(range(0,frame[3]-frame[2]))
         field = RegularGridInterpolator((Xg,Yg),V,'cubic',False,0.0)
@@ -468,11 +467,11 @@ class Curve:
             return niX,niY,du*L
 
         # start with a naive coordinate interpolation
-        factor = 5
+        #factor = 5
         interX,interY,dL = naive_interpolation(factor*(self.N-1))
         n = len(interX)
 
-        k = 1.5
+        #k = 1.5
         dx = 1e-3
         Cbuf = np.zeros((n,2))
         delx = np.zeros((n,2))
@@ -538,7 +537,7 @@ class Curve:
             return -G
 
         
-        res = minimize(energy_2,np.concatenate([interX,interY]),method="CG", jac=energy_2_jac)
+        res = minimize(energy_2,np.concatenate([interX,interY]),method="CG", jac=energy_2_jac,options={"maxiter":maxit})
         refX = np.zeros((n+2))
         refY = np.zeros((n+2))
         refX[0] = xStart
@@ -678,7 +677,7 @@ class Cell:
         for cv in self.filament.curves:
             rfc += 1
             if cv.N >= 5:
-                cv.refine(MT)
+                cv.refine(MT,sigma=1.2,k=15.0,factor=5,maxit=25)
             if rfc % 100 == 0:
                 print(rfc)
         if verbose:
