@@ -1,5 +1,5 @@
 # Fluorescence Microscopy - Filament Extraction
-A python package to extract filament like structures from fluorescence microscopy images using a CNN approach.
+A python package for image processing to identify and extract filament like structures from fluorescence microscopy images using a CNN approach. This can be useful for analysing cytoskeletal protein networks in cells, like for example Microtubuli networks.
 
 _Author: David Ventzke_
 
@@ -30,7 +30,7 @@ Suppose we have an approximately planar network of protein filaments. Then we ca
 
 The image processing method for filament extraction works as follows:
 - 1) Simulate random filament network structures
-- 2) Apply the known imaging model to these images to simulate fluorescence microscopy images of the filament networks. This requires some parameter tuning (optical resolution, SNR, background) to mimic the real world imaging process. The parameters can be identified by comparing the simulated images to the real images of interest. See [DemoForward](./Forward-Operator-Demo.ipynb) for an example.
+- 2) Apply the known imaging model to these images to simulate fluorescence microscopy images of the filament networks. This requires some parameter tuning (optical resolution, SNR, background) to mimic the real world imaging process. The parameters can be identified by comparing the simulated images to the real images of interest. See [Forward-Operator-Demo.ipynb](./Forward-Operator-Demo.ipynb) for an example.
 - 3) Train a convolutional neural network (CNN) to reconstruct the original network structure given the fluorescence microscopy image on the simulate. The network structure is encoded in a sparse 3D matrix, where 2D represent the original image and a 3rd (periodic) dimension represents local filament orientation, thus representing filaments as curves on $\mathbb R^2 \times S^1$ for better filament separability even in dense network regions. 
 - 4) To identify and extract filaments from a real images, apply the trained CNN to the image, then use a skeletonization based algorithm to detect all filaments in the output matrix and extract their approximate pixel coordinates
 - 5) For each filament, create a refinement of the pixelated coordinates by fitting a smoothe curve onto the previous pixel coordinates such that the resulting curve optimally matches the intensity pattern in the image, while preserving smootheness.
