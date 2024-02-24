@@ -385,7 +385,10 @@ class Curve:
         -------
         Nothing but self.k stores the curvature estimates and self.spol the orientation as angle in [0,2*pi]
         """
-        d = 2*s
+        if self.refined:
+            d = 5*4*int(round(np.sqrt(s)))+1
+        else:
+            d = 4*int(round(np.sqrt(s)))+1
         self.cpa = True
         self.k = np.zeros(self.N)
         self.spol = np.zeros(self.N)
@@ -408,6 +411,7 @@ class Curve:
         """
         Generate a Curve object by giving the x and y coordinates as 1d-arrays, also o is the orientation estimation in (0,pi) for each pixel
         """
+        self.refined = False
         self.N = len(x)
         self.x = x
         self.y = y
