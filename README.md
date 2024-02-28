@@ -6,7 +6,7 @@ _Author: David Ventzke_
 ### Introduction
 When analysing confocal fluorescence microscope images of cytoskeletons or other biological protein networks one may be confronted with the task to extract all the filaments from such a noisy image for further analysis of the network. This should include approximating curves for each of the detected filaments.
 
-CyCNN solves this problem and idenfies all filament like structures in an image as well as close approximation of the filament shapes (as much as the image resolution permits). While this method was developed to analyze in-vivo networks of microtubules but generalizes well to other types of filament networks. A demo can be found in the following [Jupyter-Notebook](CNN%20Demo.ipynb)
+CyCNN solves this problem and identifies all filament like structures in an image as well as close approximation of the filament shapes (as much as the image resolution permits). While this method was developed to analyze in-vivo networks of microtubules but generalizes well to other types of filament networks. A demo can be found in the following [Jupyter-Notebook](CNN%20Demo.ipynb)
 
 Our algorithm makes use of a Convolutional Neural Network trained on filament network structures to invert the artefacts introduced by the flourescence microscopy imaging process (i.e. different types of imaging noise, Point-Spread-Functions, etc.). The network reliably identifies filaments and also allows for differentiation of close by or intersecting filaments. In a second step identfied filaments are smoothly interpolated on the pixel grid, based on the intensity distribution of the image. For further details see [Methods](#methods)
 
