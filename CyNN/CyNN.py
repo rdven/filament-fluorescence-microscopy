@@ -16,7 +16,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 
 """
-This class generates filaments and realisitcally mimics the imaging process of a flourescence microscope
+This class generates filaments and realistically mimics the imaging process of a fluorescence microscope
 to generate realistic training data for the skeletonisation model.
 """
 class FMGenerator:
@@ -28,7 +28,7 @@ class FMGenerator:
     back = 0.1
 
     def __init__(self, n,res,err,blur,back,backnoise=0.0,lowfreq=0.0,filnoise=0.0):
-        # res should be a 3-touple: x,y,angular resolution
+        # res should be a 3-tuple: x,y,angular resolution
         self.nfil = n
         self.resolution = res
         self.noise = err
@@ -45,7 +45,7 @@ class FMGenerator:
         phistd = 0.04
         ds = 0.8*self.resolution[0]/steps
 
-        # use a possionized number of filaments
+        # use a poissonized number of filaments
         N = np.random.poisson(self.nfil)
         if N == 0:
             return f
@@ -84,7 +84,7 @@ class FMGenerator:
         g = gaussian_filter(g,self.blur)
         # apply noise level
         e = np.random.normal(scale=self.noise,size=g.shape)
-        # intentisity proportional filament noise
+        # intensity proportional filament noise
         ef = np.random.normal(size=g.shape)*np.sqrt(fs)*self.fln
 
         # optional apply low frequency background effects
@@ -94,20 +94,42 @@ class FMGenerator:
 
         gobs = np.clip(g + e + ef + dback + nback,0,np.inf)
         return gobs
+    
+    # This forward operator has randomized parameters, which should improve stability
+    def forward_operator_var(self,f):               
 
+        fs = np.sum(f,axis=2)
+        g = fs+self.back
+        # poisson noise
+        m = 12
+        g = np.random.poisson(m*g)/m
+        # apply blur
+        g = gaussian_filter(g,self.blur)
+        # apply noise level
+        e = np.random.normal(scale=self.noise+ np.random.lognormal(-0.005, 0.01,1),size=g.shape)
+        # intentisity proportional filament noise
+        ef = np.random.normal(size=g.shape)*np.sqrt(fs)*(self.fln+np.random.lognormal(-0.005, 0.01,1))
+
+        # optional apply low frequency background effects
+        dback = (self.backn+np.random.lognormal(-0.005, 0.01,1))*0.5*(np.random.uniform()+1)
+        
+        nback = np.clip(self.lf*20.0*gaussian_filter(np.random.normal(size=(self.resolution[0],self.resolution[1])),sigma=20.0,mode='wrap'),0,np.inf)
+
+        gobs = np.clip(g + e + ef + dback + nback,0,np.inf)
+        return gobs
 
 #### PARAMETERS FOR CNN MODEL
 # this defines the model we use
 standard_resolution = (80,80,16)
-# do we use a bias in the covolutions? recommended: False
+# do we use a bias in the covolutions? recommended: False 
 BIAS = False
 
 """
 This is a fully convolutional network, that which can be used, after training as follows:
 - saving the model: model.save(path)
 - loading the model: tf.keras.models.load_model(path)
-- applying the model to a flourescence image directly: model.encoder(data as 4-d array [n_img,xres,yres,1])
-# note: use_bias either all True or all False, both has advantages/disadvantages
+- applying the model to a fluorescence image directly: model.encoder(data as 4-d array [n_img,xres,yres,1])
+# note: use_bias either all True or all False, both has advantages/disadvantages 
 """
 class FilamentReconstructor(Model):
     # stores latest model for default use
@@ -145,6 +167,25 @@ class FilamentReconstructor(Model):
             Y[i,:,:,:] = f 
             X[i,:,:] = G.forward_operator(f)
         return X,Y
+    
+
+    # This variant generates a generator that should
+    def generator_training_data(N,resolution,image_model_params=None):
+        # image_model_params should be a dictionary containing the necessary parameters for the FMGenerator construction
+        params = {'n': 3, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
+        if isinstance(image_model_params,dict):
+            params = image_model_params
+        G = FMGenerator(**params)
+        while True :
+            Y = np.zeros((N,resolution[0],resolution[1],resolution[2]))
+            X = np.zeros((N,resolution[0],resolution[1]))
+            for i in range(N):
+                f = G.make()
+                Y[i,:,:,:] = f 
+                X[i,:,:] = G.forward_operator(f)
+            yield X,Y
+
+   
 
     """
     Returns a model which solves the MT inverse problem for a specified imaging forward model,
@@ -170,6 +211,34 @@ class FilamentReconstructor(Model):
                     epochs=epochs,
                     shuffle=True,
                     validation_data=(Xtest, Ytest))
+        
+        ## create a table of reference quantiles for rescaling of input images
+        if BIAS:
+            N = np.linspace(0.0,60.0,num=61)
+            QT = np.zeros((610,3))
+
+            for i in range(61):
+                image_model_params['n'] = N[i]
+                G = FMGenerator(**image_model_params)
+                for k in range(10):
+                    f = np.asfarray(G.forward_operator(G.make()))
+                    QT[10*i+k,:] = np.quantile(f.flatten(),[0.01,0.6,0.99])
+            recon.QT = QT
+
+        return recon
+    
+    def train_model_online(Ndata,resolution,epochs,image_model_params=None, lrnRat=1e-3):
+        
+
+        recon = FilamentReconstructor(resolution)
+        recon.compile(optimizer=Adam(lrnRat), loss=losses.MeanSquaredError())
+
+        recon.fit(FilamentReconstructor.generator_training_data(Ndata,resolution),
+                    epochs=epochs,
+                    shuffle=True,
+                    steps_per_epoch = 1 ,
+                    validation_steps =1,
+                    validation_data=FilamentReconstructor.generator_training_data(int(Ndata*0.75),resolution) )
         
         ## create a table of reference quantiles for rescaling of input images
         if BIAS:
@@ -285,8 +354,10 @@ class SegmentUtility:
             lb = L[x,y,0]
             for j in [-1,0,1]:
                 for k in [-1,0,1]:
-                    if N[x+j,y+k,res] == 2:
-                        l = L[x+j,y+k,res]
+                    if (x+i)< L.shape[0] and (x+i)>=0 and (y+j)< L.shape[1] and (y+j)>=0 : 
+                        if N[x+j,y+k,res] == 2:
+                            l = L[x+j,y+k,res]
+                            
             if (l != 0) and (lb != l):
                 L[L==l] = lb
         # account for filament endpoints at crossings:
@@ -305,8 +376,11 @@ class SegmentUtility:
             for i in [-1,0,1]:
                 for j in [-1,0,1]:
                     for k in [-1,0,1]:
-                        if N[(x+i),(y+j),(z+k)%a]>2:
-                            L[(x+i),(y+j),(z+k)%a]=l
+                        if (x+i)< L.shape[0] and (x+i)>=0 and (y+j)< L.shape[1] and (y+j)>=0  : 
+                            if N[(x+i),(y+j),(z+k)%a]>2:
+                                L[(x+i),(y+j),(z+k)%a]=l
+                                
+                                    
         # TODO: Piece angled filaments back together if there are no possible conflicts..
         # All filament intersection and ends
         SEP = (N1 > 0)*(N1 != 2)
@@ -653,7 +727,7 @@ class CNNFilamentator:
         F = Filament(Fx,Ep)
         return Sx,Fx,F
 
-# this class stores a Filament object and generates this automatically from fluorescence microskopy images 
+# this class stores a Filament object and generates this automatically from fluorescence microscopy images 
 # can be saved and reloded to hard drive to prevent rerunning calculations
 # stores all relevant informations about a sample cell
 class Cell:

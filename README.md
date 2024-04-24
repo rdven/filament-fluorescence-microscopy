@@ -12,7 +12,7 @@ Our algorithm makes use of a Convolutional Neural Network trained on filament ne
 
 ### Example
 
-Consider the following cell image of Microtubules in a MEF (image on the right is a subsection). We would like to detect all the Microtubules in the dense network and retrieve their coordinates from the image. 
+Consider the following cell image of microtubules in a MEF (image on the right is a subsection). We would like to detect all the Microtubules in the dense network and retrieve their coordinates from the image. 
 
 ![Microtubules in Fibroblast](./example_img/example.png)
 
