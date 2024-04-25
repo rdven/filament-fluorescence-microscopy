@@ -104,14 +104,14 @@ class FMGenerator:
         m = 12
         g = np.random.poisson(m*g)/m
         # apply blur
-        g = gaussian_filter(g,self.blur)
+        g = gaussian_filter(g,self.blur-0.1+0.2*np.random.uniform(0,1))
         # apply noise level
-        e = np.random.normal(scale=self.noise+ np.random.lognormal(-0.005, 0.01,1),size=g.shape)
+        e = np.random.normal(scale=np.random.lognormal(np.log(self.noise), 0.25,1),size=g.shape)
         # intentisity proportional filament noise
-        ef = np.random.normal(size=g.shape)*np.sqrt(fs)*(self.fln+np.random.lognormal(-0.005, 0.01,1))
+        ef = np.random.normal(size=g.shape)*np.sqrt(fs)*(np.random.lognormal(np.log(self.fln), 0.25,1))
 
         # optional apply low frequency background effects
-        dback = (self.backn+np.random.lognormal(-0.005, 0.01,1))*0.5*(np.random.uniform()+1)
+        dback = (np.random.lognormal(np.log(self.backn), 0.25,1))*0.5*(np.random.uniform()+1)
         
         nback = np.clip(self.lf*20.0*gaussian_filter(np.random.normal(size=(self.resolution[0],self.resolution[1])),sigma=20.0,mode='wrap'),0,np.inf)
 
@@ -165,14 +165,14 @@ class FilamentReconstructor(Model):
         for i in range(N):
             f = G.make()
             Y[i,:,:,:] = f 
-            X[i,:,:] = G.forward_operator(f)
+            X[i,:,:] = G.forward_operator_var(f)
         return X,Y
     
 
     # This variant generates a generator that should
     def generator_training_data(N,resolution,image_model_params=None):
         # image_model_params should be a dictionary containing the necessary parameters for the FMGenerator construction
-        params = {'n': 3, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
+        params = {'n': 15, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
         if isinstance(image_model_params,dict):
             params = image_model_params
         G = FMGenerator(**params)
@@ -182,10 +182,10 @@ class FilamentReconstructor(Model):
             for i in range(N):
                 f = G.make()
                 Y[i,:,:,:] = f 
-                X[i,:,:] = G.forward_operator(f)
+                X[i,:,:] = G.forward_operator_var(f)
             yield X,Y
 
-   
+
 
     """
     Returns a model which solves the MT inverse problem for a specified imaging forward model,
@@ -236,9 +236,9 @@ class FilamentReconstructor(Model):
         recon.fit(FilamentReconstructor.generator_training_data(Ndata,resolution),
                     epochs=epochs,
                     shuffle=True,
-                    steps_per_epoch = 1 ,
+                    steps_per_epoch = 10,
                     validation_steps =1,
-                    validation_data=FilamentReconstructor.generator_training_data(int(Ndata*0.75),resolution) )
+                    validation_data=FilamentReconstructor.generator_training_data(int(Ndata*0.2),resolution) )
         
         ## create a table of reference quantiles for rescaling of input images
         if BIAS:
@@ -610,8 +610,8 @@ class Curve:
             Fb = field(Cbuf)
             Fx = field(Cbuf+delx)
             Fy = field(Cbuf+dely)
-            G[:n] += -(Fx-Fb)/dx
-            G[n:] += -(Fy-Fb)/dx
+            G[:n] += (Fx-Fb)/dx
+            G[n:] += (Fy-Fb)/dx
             return -G
 
         
@@ -750,16 +750,16 @@ class Cell:
         self.skelett,self.labeled,self.filament = cnnFil.extract_filaments(MT)
         # do the curvature analysis use 16 px**2 as scale
         if verbose:
-            print(f"[INFO] on cell {metadata}: refining filaments.")
+            print(f"[INFO] on cell {metadata}: refining {len(self.filament.curves)} filaments.")
         rfc = 0
         for cv in self.filament.curves:
             rfc += 1
             if cv.N >= 5:
-                cv.refine(MT,sigma=1.2,k=15.0,factor=5,maxit=25)
+                cv.refine(MT,sigma=0.5,k=4.5,factor=2,maxit=25)
             if rfc % 100 == 0:
                 print(rfc)
         if verbose:
-            print(f"[INFO] on cell {metadata}: calculating refined curvature/orientation.")
+            print(f"[INFO] on cell {metadata}: calculating refined curvature/orientation. On {len(self.filament.curves)} filaments.")
         self.filament.cp_analysis(25)
         return
 
