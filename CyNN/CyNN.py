@@ -22,8 +22,8 @@ to generate realistic training data for the skeletonisation model.
 class FMGenerator:
 
     nfil = 1
-    resolution = (80,80,8)
-    noise = 0.0
+    resolution = (80,80,16)
+    noise = 0.01
     blur = 1.0
     back = 0.1
 
@@ -772,3 +772,244 @@ class Cell:
         with open(path, 'rb') as handle:
             c = pickle.load(handle)
         return c
+    
+
+    #### PARAMETERS FOR CNN MODEL
+# this defines the model we use
+standard_resolution = (80,80,16)
+# do we use a bias in the covolutions? recommended: False 
+BIAS = False
+
+"""
+This is a fully convolutional network, that which can be used, after training as follows:
+- saving the model: model.save(path)
+- loading the model: tf.keras.models.load_model(path)
+- applying the model to a fluorescence image directly: model.encoder(data as 4-d array [n_img,xres,yres,1])
+# note: use_bias either all True or all False, both has advantages/disadvantages 
+"""
+class FilamentReconstructorU(Model):
+    # stores latest model for default use
+    latest = None
+
+    def __init__(self, resolution):
+        super(FilamentReconstructorU, self).__init__()   
+        def build_model(input_layer, start_neurons):
+            conv1 = tf.keras.layers.Conv2D(start_neurons*1,(3,3), activation='relu', padding='same', use_bias=False)(input_layer)
+            conv1 = tf.keras.layers.Conv2D(start_neurons*1,(3,3), activation='relu', padding='same', use_bias=False)(conv1)
+            pool1 = tf.keras.layers.MaxPooling2D((2,2))(conv1)
+            pool1 = tf.keras.layers.Dropout(0.25)(pool1)
+            
+            conv2 = tf.keras.layers.Conv2D(start_neurons*2,(3,3), activation='relu', padding='same', use_bias=False)(pool1)
+            conv2 = tf.keras.layers.Conv2D(start_neurons*2,(3,3), activation='relu', padding='same', use_bias=False)(conv2)
+            pool2 = tf.keras.layers.MaxPooling2D((2,2))(conv2)
+            pool2 = tf.keras.layers.Dropout(0.5)(pool2)
+
+            conv3 = tf.keras.layers.Conv2D(start_neurons*4,(3,3), activation='relu', padding='same', use_bias=False)(pool2)
+            conv3 = tf.keras.layers.Conv2D(start_neurons*4,(3,3), activation='relu', padding='same', use_bias=False)(conv3)
+            pool3 = tf.keras.layers.MaxPooling2D((2,2))(conv3)
+            pool3 = tf.keras.layers.Dropout(0.5)(pool3)
+            
+            conv4 = tf.keras.layers.Conv2D(start_neurons*8,(3,3), activation='relu', padding='same', use_bias=False)(pool3)
+            conv4 = tf.keras.layers.Conv2D(start_neurons*8,(3,3), activation='relu', padding='same', use_bias=False)(conv4)
+            pool4 = tf.keras.layers.MaxPooling2D((2,2))(conv4)
+            pool4 = tf.keras.layers.Dropout(0.5)(pool4)
+
+            #Middle
+            convm = tf.keras.layers.Conv2D(start_neurons * 16, (3,3), activation='relu', padding='same', use_bias=False)(pool4)
+            convm = tf.keras.layers.Conv2D(start_neurons * 16, (3,3), activation='relu', padding='same', use_bias=False)(convm)
+            
+            #upconv part
+            deconv4 = tf.keras.layers.Conv2DTranspose(start_neurons*8,(3,3), strides=(2,2), padding='same', use_bias=False)(convm)
+            uconv4 = tf.keras.layers.concatenate([deconv4, conv4])
+            uconv4 = tf.keras.layers.Dropout(0.5)(uconv4)
+            uconv4 = tf.keras.layers.Conv2D(start_neurons*8, (3,3), activation='relu', padding='same', use_bias=False)(uconv4)
+            uconv4 = tf.keras.layers.Conv2D(start_neurons*8, (3,3), activation='relu', padding='same', use_bias=False)(uconv4)
+            
+            deconv3 = tf.keras.layers.Conv2DTranspose(start_neurons*8,(3,3), strides=(2,2), padding='same', use_bias=False)(uconv4)
+            uconv3 = tf.keras.layers.concatenate([deconv3, conv3])
+            uconv3 = tf.keras.layers.Dropout(0.5)(uconv3)
+            uconv3 = tf.keras.layers.Conv2D(start_neurons*4, (3,3), activation='relu', padding='same', use_bias=False)(uconv3)
+            uconv3 = tf.keras.layers.Conv2D(start_neurons*4, (3,3), activation='relu', padding='same', use_bias=False)(uconv3)
+            
+            deconv2 = tf.keras.layers.Conv2DTranspose(start_neurons*8,(3,3), strides=(2,2), padding='same', use_bias=False)(uconv3)
+            uconv2 = tf.keras.layers.concatenate([deconv2, conv2])
+            uconv2 = tf.keras.layers.Dropout(0.5)(uconv2)
+            uconv2 = tf.keras.layers.Conv2D(start_neurons*2, (3,3), activation='relu', padding='same', use_bias=False)(uconv2)
+            uconv2 = tf.keras.layers.Conv2D(start_neurons*2, (3,3), activation='relu', padding='same', use_bias=False)(uconv2)
+            
+            deconv1 = tf.keras.layers.Conv2DTranspose(start_neurons*8,(3,3), strides=(2,2), padding='same', use_bias=False)(uconv2)
+            uconv1 = tf.keras.layers.concatenate([deconv1, conv1])
+            uconv1 = tf.keras.layers.Dropout(0.5)(uconv1)
+            uconv1 = tf.keras.layers.Conv2D(start_neurons*1, (3,3), activation='relu', padding='same', use_bias=False)(uconv1)
+            uconv1 = tf.keras.layers.Conv2D(start_neurons*1, (3,3), activation='relu', padding='same', use_bias=False)(uconv1)
+            
+            output_layer = tf.keras.layers.Conv2D(16, (1,1), padding='same', activation='relu', use_bias=False)(uconv1)
+            return output_layer
+
+
+        input_layer = tf.keras.layers.Input((resolution[0], resolution[0],1))
+        output_layer = build_model(input_layer,resolution[0] )
+
+        #Initializing and compiling model
+        self.encoder = Model(input_layer, output_layer)
+
+        FilamentReconstructorU.latest = self
+
+    def call(self, x):
+        restored = self.encoder(x)
+        return restored
+    
+    # static method generates N images and filament configurations according to the imaging model specified in the FMGenerator params
+    def gen_training_data(N,resolution,image_model_params=None):
+        # image_model_params should be a dictionary containing the necessary parameters for the FMGenerator construction
+        params = {'n': 15, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
+        if isinstance(image_model_params,dict):
+            params = image_model_params
+        G = FMGenerator(**params)
+
+        Y = np.zeros((N,resolution[0],resolution[1],resolution[2]))
+        X = np.zeros((N,resolution[0],resolution[1]))
+        for i in range(N):
+            f = G.make()
+            Y[i,:,:,:] = f 
+            X[i,:,:] = G.forward_operator_var(f)
+        return X,Y
+    
+
+    # This variant generates a generator that should improve robustness
+    def generator_training_data(N,resolution,image_model_params=None):
+        # image_model_params should be a dictionary containing the necessary parameters for the FMGenerator construction
+        params = {'n': 15, 'res':resolution, 'err': 0.015, 'blur':1.0, 'back':0.02,'backnoise':0.05,'lowfreq':0.05,'filnoise':0.07}
+        if isinstance(image_model_params,dict):
+            params = image_model_params
+        G = FMGenerator(**params)
+        while True :
+            Y = np.zeros((N,resolution[0],resolution[1],resolution[2]))
+            X = np.zeros((N,resolution[0],resolution[1]))
+            for i in range(N):
+                f = G.make()
+                Y[i,:,:,:] = f 
+                X[i,:,:] = G.forward_operator_var(f)
+            yield X,Y
+
+
+
+    """
+    Returns a model which solves the MT inverse problem for a specified imaging forward model,
+    in this case defined via the prarameters 
+    """
+    def train_model(Ndata,resolution,epochs,image_model_params=None):
+        X,Y = FilamentReconstructorU.gen_training_data(Ndata,resolution,image_model_params)
+
+        ntrain = int(0.9*Ndata)
+        
+        Xtrain = X[:ntrain,:,:]
+        Xtrain = Xtrain[...,tf.newaxis]
+        Ytrain = Y[:ntrain,:,:,:]
+
+        Xtest = X[ntrain:,:,:]
+        Xtest = Xtest[...,tf.newaxis]
+        Ytest = Y[ntrain:,:,:,:]
+
+        recon = FilamentReconstructorU(resolution)
+        recon.compile(optimizer=Adam(1e-3), loss=losses.MeanSquaredError())
+
+        recon.fit(Xtrain, Ytrain,
+                    epochs=epochs,
+                    shuffle=True,
+                    validation_data=(Xtest, Ytest))
+        
+        ## create a table of reference quantiles for rescaling of input images
+        if BIAS:
+            N = np.linspace(0.0,60.0,num=61)
+            QT = np.zeros((610,3))
+
+            for i in range(61):
+                image_model_params['n'] = N[i]
+                G = FMGenerator(**image_model_params)
+                for k in range(10):
+                    f = np.asfarray(G.forward_operator(G.make()))
+                    QT[10*i+k,:] = np.quantile(f.flatten(),[0.01,0.6,0.99])
+            recon.QT = QT
+
+        return recon
+    
+    def train_model_online(Ndata,resolution,epochs,image_model_params=None, lrnRat=1e-3):
+        
+
+        recon = FilamentReconstructorU(resolution)
+        recon.compile(optimizer=Adam(lrnRat), loss=losses.MeanSquaredError())
+
+        recon.fit(FilamentReconstructorU.generator_training_data(Ndata,resolution),
+                    epochs=epochs,
+                    shuffle=True,
+                    steps_per_epoch = 5,
+                    validation_steps =1,
+                    validation_data=FilamentReconstructorU.generator_training_data(int(Ndata*0.5),resolution) )
+        
+        ## create a table of reference quantiles for rescaling of input images
+        if BIAS:
+            N = np.linspace(0.0,60.0,num=61)
+            QT = np.zeros((610,3))
+
+            for i in range(61):
+                image_model_params['n'] = N[i]
+                G = FMGenerator(**image_model_params)
+                for k in range(10):
+                    f = np.asfarray(G.forward_operator(G.make()))
+                    QT[10*i+k,:] = np.quantile(f.flatten(),[0.01,0.6,0.99])
+            recon.QT = QT
+
+        return recon
+
+    # not relevant for a homeogenous (no bias) network
+    def rescale(I,QT):
+        R = (QT[:,2]-QT[:,1])/(QT[:,1]-QT[:,0])
+        ql,qm,qh = np.quantile(I.flatten(),[0.01,0.6,0.99])
+        r = (qh-qm)/(qm-ql)
+        rsi = np.argmin(np.abs(R-r))
+        qtl = QT[rsi,0]
+        qth = QT[rsi,2]
+        In = (I-ql)/(qh-ql)
+        In = qtl+(qth-qtl)*In
+        return In
+
+    def apply_model(self,image,size=80,angles=16):
+        # slice the image
+        stride = 20
+        eff_size = size - 2*stride
+        height,width = image.shape
+        nx = (height-2*stride) // eff_size
+        ny = (width-2*stride) // eff_size
+        xoff = ((height-2*stride) % eff_size) // 2 + stride
+        yoff = ((width-2*stride) % eff_size) // 2 + stride
+        x0 = np.linspace(0,eff_size*(nx-1),num=nx,dtype=int)
+        y0 = np.linspace(0,eff_size*(ny-1),num=ny,dtype=int)
+        ims = np.zeros((nx*ny,size,size))
+        
+        ind = 0
+        for ix in range(nx):
+            for iy in range(ny):
+                piece = image[xoff+x0[ix]-stride:(xoff+x0[ix]+eff_size)+stride,yoff+y0[iy]-stride:(yoff+y0[iy]+eff_size)+stride]
+                if BIAS:
+                    ims[ind,:,:] = FilamentReconstructorU.rescale(piece,self.QT)
+                else:
+                    ims[ind,:,:] = piece
+                ind += 1
+        
+        solim = self.encoder(ims[:,:,:,None]).numpy()
+        
+        recover = np.zeros((nx*eff_size,ny*eff_size,angles))
+        
+        ind = 0
+        for ix in range(nx):
+            for iy in range(ny):
+                recover[ix*eff_size:(ix+1)*eff_size,iy*eff_size:(iy+1)*eff_size,:] = solim[ind,stride:-stride,stride:-stride,:]
+                ind += 1
+        
+        return recover
+
+    def load_model(location):
+        mod = tf.keras.models.load_model(location)
+        FilamentReconstructorU.latest = mod
+        return mod
