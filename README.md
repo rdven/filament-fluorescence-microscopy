@@ -2,6 +2,7 @@
 A python package for image processing to identify and extract filament like structures from fluorescence microscopy images using a CNN approach. This can be useful for analysing cytoskeletal protein networks in cells like microtubuli networks.
 
 _Author: David Ventzke_
+_Contributor: Gilles Mordant_
 
 ### Introduction
 When analysing confocal fluorescence microscope images of cytoskeletons or other biological protein networks, one may be confronted with the task to extract all the filaments from such a noisy image for further analysis of the network. This should include approximating curves for each of the detected filaments.
