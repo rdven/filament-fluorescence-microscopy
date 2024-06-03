@@ -1,5 +1,5 @@
 # Fluorescence Microscopy - Filament Extraction
-A python package for image processing to identify and extract filament like structures from fluorescence microscopy images using a CNN approach. This can be useful for analysing cytoskeletal protein networks in cells like microtubuli networks.
+A python package for image processing to identify and extract filament like structures from fluorescence microscopy images using a CNN / U-Net approach. This can be useful for analysing cytoskeletal protein networks in cells like microtubuli networks.
 
 _Author: David Ventzke_
 
