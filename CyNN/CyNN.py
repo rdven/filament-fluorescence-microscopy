@@ -749,15 +749,15 @@ class Cell:
             print(f"[INFO] on cell {metadata}: segmenting CNN output.")
         self.skelett,self.labeled,self.filament = cnnFil.extract_filaments(MT)
         # do the curvature analysis use 16 px**2 as scale
-        if verbose:
-            print(f"[INFO] on cell {metadata}: refining {len(self.filament.curves)} filaments.")
-        rfc = 0
-        for cv in self.filament.curves:
-            rfc += 1
-            if cv.N >= 5:
-                cv.refine(MT,sigma=0.5,k=4.5,factor=2,maxit=25)
-            if rfc % 100 == 0:
-                print(rfc)
+        #if verbose:
+        #    print(f"[INFO] on cell {metadata}: refining {len(self.filament.curves)} filaments.")
+        #rfc = 0
+        #for cv in self.filament.curves:
+        #    rfc += 1
+        #    if cv.N >= 5:
+        #        cv.refine(MT,sigma=0.5,k=4.5,factor=2,maxit=25)
+        #    if rfc % 100 == 0:
+        #        print(rfc)
         if verbose:
             print(f"[INFO] on cell {metadata}: calculating refined curvature/orientation. On {len(self.filament.curves)} filaments.")
         self.filament.cp_analysis(25)
